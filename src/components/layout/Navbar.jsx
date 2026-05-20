@@ -1,9 +1,17 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { FiMenu, FiX } from 'react-icons/fi';
+import { useWallet, shortAddress } from '../../context/WalletContext';
 
 function Navbar() {
   const [isOpen, setIsOpen] = useState(false);
+  const { account, connect, disconnect, connecting } = useWallet();
+  const handleWalletClick = () => (account ? disconnect() : connect());
+  const buttonLabel = connecting
+    ? 'Connecting…'
+    : account
+      ? shortAddress(account)
+      : 'Connect';
 
   const navigation = [
     { name: 'Home', href: '/' },
@@ -41,8 +49,11 @@ function Navbar() {
             ))}
             <button
               className="btn"
+              onClick={handleWalletClick}
+              disabled={connecting}
+              title={account || undefined}
             >
-              Connect
+              {buttonLabel}
             </button>
           </div>
 
@@ -74,9 +85,10 @@ function Navbar() {
               ))}
               <button
                 className="block mx-2 mt-2 px-3 py-2 text-base font-medium btn w-auto"
-                onClick={() => setIsOpen(false)}
+                onClick={() => { handleWalletClick(); setIsOpen(false); }}
+                disabled={connecting}
               >
-                Connect
+                {buttonLabel}
               </button>
             </div>
           </div>

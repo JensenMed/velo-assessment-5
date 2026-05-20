@@ -1,4 +1,5 @@
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
+import { WalletProvider } from './context/WalletContext';
 import Navbar from './components/layout/Navbar';
 import Footer from './components/layout/Footer';
 import Home from './pages/Home';
@@ -14,6 +15,7 @@ import NotFound from './pages/NotFound';
 
 function App() {
   return (
+    <WalletProvider>
     <Router>
       <div className="min-h-screen flex flex-col">
         <Navbar />
@@ -34,6 +36,7 @@ function App() {
         <Footer />
       </div>
     </Router>
+    </WalletProvider>
   );
 }
 

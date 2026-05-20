@@ -5,9 +5,11 @@ import { FiArrowRight, FiUser, FiClock } from 'react-icons/fi';
 import { FaWallet, FaStore, FaMoneyBillWave, FaExchangeAlt, FaChartLine, FaLock, FaUserCog, FaCoins } from 'react-icons/fa';
 import { SiEthereum } from 'react-icons/si';
 import { FiChevronDown, FiChevronUp } from 'react-icons/fi';
+import { useWallet, shortAddress } from '../context/WalletContext';
 
 function Home() {
   const [openSections, setOpenSections] = useState({});
+  const { account, connect, connecting } = useWallet();
 
   const featuredProperties = [
     {
@@ -426,11 +428,13 @@ function Home() {
                 Browse Properties
               </Link>
               <button
-                className="btn bg-gradient-to-r from-primary-700 to-primary-800 hover:from-primary-800 hover:to-primary-900"
-              >
-                <FaWallet className="mr-2" />
-                Connect Wallet
-              </button>
+  className="btn bg-gradient-to-r from-primary-700 to-primary-800 hover:from-primary-800 hover:to-primary-900"
+  onClick={connect}
+  disabled={connecting || !!account}
+>
+  <FaWallet className="mr-2" />
+  {connecting ? 'Connecting…' : account ? shortAddress(account) : 'Connect Wallet'}
+</button>
             </div>
           </div>
         </div>

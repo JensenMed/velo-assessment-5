@@ -3,9 +3,10 @@ import { motion } from 'framer-motion';
 import { FiHome, FiMaximize2, FiCalendar, FiTrendingUp, FiUsers, FiDollarSign, FiGrid } from 'react-icons/fi';
 import { FacebookShareButton, TwitterShareButton, LinkedinShareButton } from 'react-share';
 import { FaFacebook, FaTwitter, FaLinkedin, FaEthereum, FaWallet } from 'react-icons/fa';
-
+import { useWallet, shortAddress } from '../context/WalletContext';
 function PropertyDetail() {
   const { id } = useParams();
+  const { account, connect, connecting } = useWallet();
 
   const property = {
     id: parseInt(id),
@@ -288,10 +289,18 @@ function PropertyDetail() {
                 View 3D Model
               </Link>
 
-              <button className="btn w-full mb-4 flex items-center justify-center">
-                <FaWallet className="mr-2" />
-                Connect Wallet to Invest
-              </button>
+             <button
+  className="btn w-full mb-4 flex items-center justify-center"
+  onClick={connect}
+  disabled={connecting || !!account}
+>
+  <FaWallet className="mr-2" />
+  {connecting
+    ? 'Connecting…'
+    : account
+      ? `Connected: ${shortAddress(account)}`
+      : 'Connect Wallet to Invest'}
+</button>
               
               <div className="flex items-center justify-center space-x-4 pt-4 border-t">
                 <FacebookShareButton url={shareUrl}>
