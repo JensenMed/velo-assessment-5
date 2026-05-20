@@ -1,4 +1,4 @@
-const helpers = require('../providers/helper');
+const helpers = require('../../server/providers/helper');
 
 describe('helpers.isKeyMissing', () => {
   test('returns false when all required keys are present', () => {
