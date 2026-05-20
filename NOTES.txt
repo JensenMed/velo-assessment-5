@@ -103,6 +103,16 @@ upgrading would mean a lot of small syntax churn for not much benefit
 in 40 min.
 
 
+>>> server/providers/helper.js implicit global
+
+isKeyMissing had:
+   for (element of requiredArray) {
+no var/let/const, so `element` becomes an implicit global. fine in loose
+node but jest runs strict mode so the test (once i added it) threw
+ReferenceError. dropped a `const` in front of it. nice catch from the
+test actually - exactly why i wrote it.
+
+
 >>> the "Connect Wallet" buttons did nothing
 
 three buttons in the UI (Navbar, Home hero CTA, PropertyDetail invest
@@ -128,12 +138,12 @@ tests
 no test setup in the repo and no hardhat/truffle/foundry for the
 contracts, so i added two small jest files (CRA picks them up):
 
-- server/__tests__/helper.test.js
+- src/__tests__/helper.test.js
   unit tests for providers/helper.js#isKeyMissing (returns false when
   all keys present, returns first missing key, empty string counted as
   missing).
 
-- server/__tests__/homeTransaction.spec.js
+- src/__tests__/homeTransaction.spec.js
   a tiny JS port of the contract's state machine + tests covering happy
   path, realtor reject refund, role checks, deposit floor, the deadline
   check, stranger can't early-withdraw, post-deadline withdraw payouts,
@@ -141,8 +151,11 @@ contracts, so i added two small jest files (CRA picks them up):
   test but it documents the expected behavior and catches regressions
   on the control flow.
 
-run with:
+i moved them to src/__tests__/ so CRA's test runner picks them up
+(react-scripts only scans src/). run with:
    npm test -- --watchAll=false
+
+11 tests, all green.
 
 
 stuff i noticed but didn't fix
@@ -173,7 +186,8 @@ src/components/layout/Navbar.jsx             wired Connect button (desktop + mob
 src/pages/Home.jsx                           wired CTA button
 src/pages/PropertyDetail.jsx                 wired invest button
 src/context/WalletContext.jsx                new - wallet hook
-server/__tests__/helper.test.js              new - helper tests
-server/__tests__/homeTransaction.spec.js     new - contract state machine tests
+src/__tests__/helper.test.js                 new - helper tests
+src/__tests__/homeTransaction.spec.js        new - contract state machine tests
+server/providers/helper.js                   const in for-of (was implicit global)
 tsconfig.json                                deleted (no TS in src, only causing pain)
 package.json                                 + typescript, + ajv@8, - gridfs-stream
