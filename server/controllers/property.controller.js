@@ -1,15 +1,14 @@
 const mongoose = require('mongoose');
-var Grid = require('gridfs-stream');
 
 const helpers = require('../providers/helper');
 var propertyType = require('../models/propertyTypes');
 var Property = require('../models/property');
 
-var gfs;
-var conn = mongoose.connection;
-conn.on('connected', () => {
-  gfs = Grid(conn.db, mongoose.mongo);
-  gfs.collection('imageMeta');
+var bucket;
+mongoose.connection.once('open', () => {
+  bucket = new mongoose.mongo.GridFSBucket(mongoose.connection.db, {
+    bucketName: 'imageMeta',
+  });
 });
 
 module.exports = {
@@ -82,8 +81,8 @@ module.exports = {
         .populate('type', 'title');
 
       var files = [];
-      if (result && result.images.length) {
-        files = await gfs.files.find({ filename: { $in: result.images } }).toArray();
+      if (result && result.images.length && bucket) {
+        files = await bucket.find({ filename: { $in: result.images } }).toArray();
       }
       if (result) res.status(200).json({ result, files });
       else throw new Error('Something Went Wrong');
@@ -149,21 +148,18 @@ module.exports = {
     console.log({ testData });
     return res.send(testData);
   },
-  showGFSImage: (req, res) => {
-    gfs.files.findOne({ filename: req.params.filename }, (err, file) => {
-      if (!file || file.length === 0) {
-        return res.status(404).json({
-          err: 'No file exists'
-        });
+  showGFSImage: async (req, res) => {
+    if (!bucket) return res.status(503).json({ err: 'Storage not ready' });
+    try {
+      const file = await bucket.find({ filename: req.params.filename }).next();
+      if (!file) return res.status(404).json({ err: 'No file exists' });
+      if (file.contentType !== 'image/jpeg' && file.contentType !== 'image/png') {
+        return res.status(404).json({ err: 'Not an image' });
       }
-      if (file.contentType === 'image/jpeg' || file.contentType === 'image/png') {
-        const readstream = gfs.createReadStream(file.filename);
-        readstream.pipe(res);
-      } else {
-        res.status(404).json({
-          err: 'Not an image'
-        });
-      }
-    })
+      res.set('Content-Type', file.contentType);
+      bucket.openDownloadStreamByName(file.filename).pipe(res);
+    } catch (err) {
+      res.status(400).json({ err: err.message });
+    }
   }
 }
